@@ -29,6 +29,18 @@
 #define FLAGS   0
 #endif
 
+/* The devicetree node identifier for the "led1" alias. */
+#define LED1_NODE   DT_ALIAS(led1)
+
+#if DT_NODE_HAS_STATUS(LED1_NODE, okay)
+#define LED1        DT_GPIO_LABEL(LED1_NODE, gpios)
+#define LED1_PIN    DT_GPIO_PIN(LED1_NODE, gpios)
+#define LED1_FLAGS  DT_GPIO_FLAGS(LED1_NODE, gpios)
+#else
+/* A build error here means your board isn't set up to blink an LED. */
+#error "Unsupported board: led0 devicetree alias is not defined"
+#endif
+
 /* The devicetree node identifier for the "sw0" alias. */
 #define SW0_NODE    DT_ALIAS(sw0)
 
@@ -38,9 +50,17 @@
 #define SW0_GPIO_FLAGS    (GPIO_INPUT | DT_GPIO_FLAGS(SW0_NODE, gpios))
 #else
 #error "Unsupported board: sw0 devicetree alias is not defined"
-#define SW0_GPIO_LABEL    ""
-#define SW0_GPIO_PIN    0
-#define SW0_GPIO_FLAGS    0
+#endif
+
+/* The devicetree node identifier for the "sw1" alias. */
+#define SW1_NODE    DT_ALIAS(sw1)
+
+#if DT_NODE_HAS_STATUS(SW1_NODE, okay)
+#define SW1_GPIO_LABEL    DT_GPIO_LABEL(SW1_NODE, gpios)
+#define SW1_GPIO_PIN    DT_GPIO_PIN(SW1_NODE, gpios)
+#define SW1_GPIO_FLAGS    (GPIO_INPUT | DT_GPIO_FLAGS(SW1_NODE, gpios))
+#else
+#error "Unsupported board: sw0 devicetree alias is not defined"
 #endif
 
 #define MY_WORK_STACK_SIZE      512
@@ -57,8 +77,10 @@ typedef struct device_info {
 } device_info;
 
 static device_info my_device;
+static device_info sys_device;
 
 static struct gpio_callback button_cb_data;
+static struct gpio_callback button1_cb_data;
 
 static void work_worker(struct k_work *item)
 {
@@ -95,11 +117,49 @@ static int work_init(const struct device *device)
     return 0;
 }
 
+static void sys_worker(struct k_work *item)
+{
+    static bool led_is_on = false;
+    const struct device *dev;
+    struct device_info *the_device =
+        CONTAINER_OF(item, struct device_info, work);
+
+    printk("Name of device %s\n", the_device->name);
+
+    dev = device_get_binding(LED1);
+    if (dev == NULL) {
+        return;
+    }
+
+    led_is_on = !led_is_on;
+    gpio_pin_set(dev, LED1_PIN, (int)led_is_on);
+}
+
+static int sys_work_init(const struct device *device)
+{
+    ARG_UNUSED(device);
+
+    /* initialize name info for a device */
+    strcpy(sys_device.name, "sys_device");
+
+    /* initialize work item for printing device's error messages */
+    k_work_init(&sys_device.work, sys_worker);
+
+    return 0;
+}
+
 static void button_pressed(const struct device *dev, struct gpio_callback *cb,
             uint32_t pins)
 {
     printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
     k_work_submit_to_queue(&my_work_q, &my_device.work);
+}
+
+static void button1_pressed(const struct device *dev, struct gpio_callback *cb,
+            uint32_t pins)
+{
+    printk("Button pressed at %" PRIu32 "\n", k_cycle_get_32());
+    k_work_submit(&sys_device.work);
 }
 
 static int button_init(const struct device *device)
@@ -135,6 +195,32 @@ static int button_init(const struct device *device)
     gpio_add_callback(button, &button_cb_data);
     printk("Set up button at %s pin %d\n", SW0_GPIO_LABEL, SW0_GPIO_PIN);
 
+    button = device_get_binding(SW1_GPIO_LABEL);
+    if (button == NULL) {
+        printk("Error: didn't find %s device\n", SW1_GPIO_LABEL);
+        return -1;
+    }
+
+    ret = gpio_pin_configure(button, SW1_GPIO_PIN, SW1_GPIO_FLAGS);
+    if (ret != 0) {
+        printk("Error %d: failed to configure %s pin %d\n",
+               ret, SW1_GPIO_LABEL, SW1_GPIO_PIN);
+        return ret;
+    }
+
+    ret = gpio_pin_interrupt_configure(button,
+                       SW1_GPIO_PIN,
+                       GPIO_INT_EDGE_TO_ACTIVE);
+    if (ret != 0) {
+        printk("Error %d: failed to configure interrupt on %s pin %d\n",
+            ret, SW1_GPIO_LABEL, SW1_GPIO_PIN);
+        return ret;
+    }
+
+    gpio_init_callback(&button1_cb_data, button1_pressed, BIT(SW1_GPIO_PIN));
+    gpio_add_callback(button, &button1_cb_data);
+    printk("Set up button at %s pin %d\n", SW1_GPIO_LABEL, SW1_GPIO_PIN);
+
     return 0;
 }
 
@@ -155,11 +241,22 @@ static int led_init(const struct device *device)
         return ret;
     }
     gpio_pin_set(dev, LED0_PIN, 0);
+
+    dev = device_get_binding(LED1);
+    if (dev == NULL) {
+        return -1;
+    }
+
+    ret = gpio_pin_configure(dev, LED1_PIN, GPIO_OUTPUT_ACTIVE | LED1_FLAGS);
+    if (ret < 0) {
+        return ret;
+    }
+    gpio_pin_set(dev, LED1_PIN, 0);
     return 0;
 }
-
 
 
 SYS_INIT(work_init, POST_KERNEL, INIT_PRIORITY);
 SYS_INIT(button_init, POST_KERNEL, INIT_PRIORITY);
 SYS_INIT(led_init, POST_KERNEL, INIT_PRIORITY);
+SYS_INIT(sys_work_init, POST_KERNEL, INIT_PRIORITY);
