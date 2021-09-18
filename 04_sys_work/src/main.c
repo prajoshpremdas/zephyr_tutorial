@@ -51,10 +51,12 @@
 K_THREAD_STACK_DEFINE(my_stack_area, MY_WORK_STACK_SIZE);
 static struct k_work_q my_work_q;
 
-struct device_info {
+typedef struct device_info {
     struct k_work work;
     char name[16];
-} my_device;
+} device_info;
+
+static device_info my_device;
 
 static struct gpio_callback button_cb_data;
 
