@@ -24,10 +24,9 @@ void task0(void)
 {
     LOG_DBG("task0");
     while (1) {
-        k_sleep(K_MSEC(1000));
+        k_sleep(K_MSEC(100));
         if (k_sem_take(&sync_sem, K_FOREVER) == 0) {
-            LOG_DBG("got sem task0");
-            k_sem_give(&sync_sem);
+            LOG_DBG("take sem task0");
         }
     }
 }
@@ -36,8 +35,8 @@ void task1(void)
 {
     LOG_DBG("task1");
     while (1) {
-        k_sleep(K_MSEC(100));
-        LOG_DBG("got sem task1");
+        k_sleep(K_MSEC(10000));
+        LOG_DBG("give sem task1");
         k_sem_give(&sync_sem);
     }
 }
